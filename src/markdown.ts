@@ -626,8 +626,16 @@ const DefaultEndLeaf: readonly ((cx: BlockContext, line: Line) => boolean)[] = [
   (p, line) => isBulletList(line, p, true) >= 0,
   (p, line) => isOrderedList(line, p, true) >= 0,
   (p, line) => isHorizontalRule(line, p, true) >= 0,
-  (p, line) => isHTMLBlock(line, p, true) >= 0
+  (p, line) => isHTMLBlock(line, p, true) >= 0,
+  // Непустые строки без маркеров больше не являются частью списков
+  (p, line) => inList(p, Type.BulletList) && !/^\s[*+-]\s+/.test(line.text),
+  (p, line) => inList(p, Type.OrderedList) && !/^\s\d+\.\s+/.test(line.text),
 ]
+
+const emptyLineEndsBlockContext: Partial<Record<Type, (cx: BlockContext, line: Line) => boolean>> = {
+    [Type.BulletList]: (cx, line) => isBulletList(line, cx, false) < 0,
+    [Type.OrderedList]: (cx, line) => isOrderedList(line, cx, false) < 0,
+}
 
 const scanLineResult = {text: "", end: 0}
 
@@ -695,6 +703,16 @@ export class BlockContext implements PartialParse {
         this.finishContext()
       }
       if (line.pos < line.text.length) break
+      // Пустые строки без маркеров больше не являются частью списков
+      for (let depth = this.stack.length - 1; depth >= 0; depth--) {
+        const cx = this.stack[depth]
+        if (cx.type in emptyLineEndsBlockContext && emptyLineEndsBlockContext[cx.type as Type]?.(this, line)) {
+          for (let i = 0, length = this.stack.length - depth; i < length; i++) {
+            this.finishContext()
+          }
+          break
+        }
+      }
       // Empty line
       if (!this.nextLine()) return this.finish()
     }
